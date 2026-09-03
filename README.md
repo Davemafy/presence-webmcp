@@ -1,145 +1,127 @@
-<div align="center">
-
 # Presence
 
-### Multiplayer permissioning for humans and browser agents.
+**A browser-agent admission layer for live software.**
 
-**Presence lets a human and an AI agent safely work inside the same live web app — at the same time — with scoped authority, conflict prevention, and human approval.**
+Presence lets a human and an AI agent work inside the same live web app at the same time — without giving the agent unrestricted control.
 
-[**Run the flagship demo ↗**](https://bright-mochi-538dec.netlify.app/?demo=1) · [**Open the live product ↗**](https://bright-mochi-538dec.netlify.app/) · [**Read the WebMCP spec**](./docs/WEBMCP_SPEC.md)
+The human owns **Mobile**. The browser agent can be admitted into **Tablet**. Both operate on one revisioned project. Agent changes stay provisional, stale writes are rejected before execution, and the human keeps the final say.
 
-`WebMCP` · `React` · `TypeScript` · `Zustand` · `Framer Motion` · `Vitest` · `Playwright`
+[**Run the flagship demo →**](https://bright-mochi-538dec.netlify.app/?demo=1) · [**Open Presence →**](https://bright-mochi-538dec.netlify.app/) · [**WebMCP contract**](./docs/WEBMCP_SPEC.md)
 
-</div>
+<!-- README HERO VIDEO: place the real Presence demo recording here. Do not replace it with an architecture illustration. -->
 
-[![Presence — human/agent collaboration boundary](./docs/assets/readme/presence-boundary.svg)](https://bright-mochi-538dec.netlify.app/?demo=1)
-
-> **Don’t demo the cursor. Demo the boundary.**
->
-> A human edits **Mobile**. The browser agent owns **Tablet**. Presence prevents stale agent work from overwriting the human’s newer shared state.
+> **The demo moment:** while the agent is adapting Tablet, the human edits Mobile. The shared revision advances. The agent's next write is rejected as `STALE_STATE`, it re-reads the project, recovers, and continues — without overwriting the human.
 
 ---
 
-## The 45-second proof
+## What Presence proves
 
-Presence is built around one sequence that is understandable even with the demo muted:
+Presence is built around three attacks that a live human + agent workspace has to survive.
+
+| Attack | Result |
+| --- | --- |
+| Agent attempts to change **Mobile** | `SURFACE_NOT_ASSIGNED` — Mobile remains human-owned. |
+| Human changes shared state while the agent is working | `STALE_STATE` — the old agent write is rejected before execution. |
+| Human revokes the agent and it tries another mutation | `ADMISSION_REVOKED` — authority is gone immediately. |
+
+Those results come from the domain engine. They are not scripted error messages for the demo.
+
+---
+
+## The flagship flow
 
 ```text
-UNASSIGNED
-   ↓
-agent discovers Presence through WebMCP
-   ↓
-requests the Tablet seat
-   ↓
-human reviews scope and admits
-   ↓
-agent works provisionally on Tablet
-   ↓
-human edits Mobile → shared revision advances
-   ↓
-agent attempts its stale Tablet write
-   ↓
-STALE_STATE — write is blocked before execution
-   ↓
+Tablet is empty
+    ↓
+browser agent discovers Presence through WebMCP
+    ↓
+agent requests the Tablet collaborator seat
+    ↓
+human sees the exact requested scope and admits
+    ↓
+agent inspects the live project and works provisionally on Tablet
+    ↓
+human edits Mobile → canonical revision advances
+    ↓
+agent attempts a write from its old revision
+    ↓
+STALE_STATE
+    ↓
 agent re-reads fresh state and continues
-   ↓
-PROPOSAL READY → human reviews → accepts
-   ↓
+    ↓
+proposal ready
+    ↓
+human reviews individual Tablet operations
+    ↓
+human accepts → proposal becomes canonical
+    ↓
 human revokes agent
-   ↓
-next agent mutation → ADMISSION_REVOKED
+    ↓
+next mutation → ADMISSION_REVOKED
 ```
 
-There are three release-critical attacks:
-
-| Attack | What Presence must do |
-| --- | --- |
-| Agent attempts a **Mobile** mutation | Reject it as out of scope. Mobile belongs to the human. |
-| Agent writes from an **older revision** | Reject it as `STALE_STATE`. Human work survives untouched. |
-| Agent mutates after **revocation** | Reject it as `ADMISSION_REVOKED`. Authority disappears immediately. |
-
-That is the product.
+The final state is boring on purpose: one coherent project, no agent left in the workspace, and no human work lost.
 
 ---
 
 ## Why this exists
 
-Browser agents are becoming capable of operating real software, but “the agent can click the app” is not enough for live collaboration.
+A browser agent being able to click a web app is not the same thing as safely collaborating inside it.
 
-The hard question is **authority**:
+Once a human and an agent can both change live software, the important questions become:
 
-- What part of the app can the agent touch?
-- Who granted that permission?
-- What happens when the human changes shared state while the agent is still working?
-- Are agent changes immediately canonical, or provisional?
-- Who gets the final say?
-- What happens one millisecond after access is revoked?
+- **Admission** — does the agent get to enter at all?
+- **Scope** — which surface and capabilities can it mutate?
+- **Concurrency** — what happens if the human changes state while the agent is still working?
+- **Provisionality** — are agent changes immediately canonical?
+- **Authority** — who can accept, pause, or revoke?
+- **Evidence** — can the product prove that a denied write was actually denied?
 
-Presence makes those answers explicit in the product instead of hiding them in agent prompts.
-
-### Without Presence vs. with Presence
-
-| | Typical browser-agent flow | Presence |
-| --- | --- | --- |
-| Authority | Broad / implicit | Human-approved capability + surface scope |
-| Concurrent human edits | Easy to overwrite | Revision-checked before mutation |
-| Agent changes | Often immediate | Provisional until human acceptance |
-| Conflicts | Discovered after damage | Blocked at the mutation boundary |
-| Revocation | UI state may change | Mutation authority is removed |
-| Auditability | Agent narration | Domain events + revisions |
+Presence makes those rules part of the application model instead of leaving them in a prompt.
 
 ---
 
-## The model
+## One project, three territories
 
-The flagship host is **Aurora Responsive Studio**. It exists to make the collaboration boundary spatially obvious:
+The demo host is **Aurora Responsive Studio**.
 
 - **Desktop** — reference surface
-- **Tablet** — the browser agent’s admitted seat
-- **Mobile** — the human’s live editable surface
-- **Shared Project** — canonical revisioned state
+- **Tablet** — the browser agent's admitted seat
+- **Mobile** — the human's editable surface
+- **Shared Project** — canonical revisioned state used by both
 
-The surfaces are not three unrelated mockups. Human edits and agent proposals operate on the same responsive project model.
+These are not three disconnected mockups. Human edits and agent proposals operate on the same responsive project model.
 
-```mermaid
-flowchart TB
-    H[Human] -->|edits canonical state| M[Mobile · YOU]
-    A[Browser agent] -->|requests admission| P[Presence authority]
-    P -->|Tablet capability granted| T[Tablet · YOUR AGENT]
+The spatial room exists so authority is visible: you can see who occupies a surface, where provisional work is happening, and which project revision everyone is acting against.
 
-    M --> S[(Shared Project\nrevision N)]
-    T -->|provisional operation\nexpectedRevision = N| G{Permission + revision gate}
-    S --> G
+---
 
-    G -->|scope valid + fresh| R[Proposal preview]
-    G -->|wrong surface| O[SURFACE_NOT_ASSIGNED]
-    G -->|revision changed| X[STALE_STATE]
-    G -->|revoked| V[ADMISSION_REVOKED]
+## Admission before execution
 
-    R -->|human accepts| S2[(Shared Project\nrevision N + 1)]
+An agent does not simply appear and start editing.
+
+1. A browser agent discovers semantic tools exposed by Presence.
+2. It inspects the available collaborator roles.
+3. It requests the **Tablet** seat with a reason.
+4. The human sees the requested scope.
+5. The human admits or declines.
+6. Only an active admission creates mutation authority.
+
+Inspection and mutation are intentionally different capabilities. **Seeing the project does not imply permission to change it.**
+
+---
+
+## Revision-gated concurrency
+
+Every canonical human edit advances the shared project revision.
+
+Agent mutation tools must include the revision they inspected:
+
+```ts
+expectedRevision: number
 ```
 
----
-
-## Admission is a real product primitive
-
-An agent does not simply appear in the workspace.
-
-1. The browser agent discovers Presence through registered WebMCP tools.
-2. It requests the **Responsive collaborator / Tablet** role with a reason.
-3. Presence shows the human the exact requested permissions.
-4. The human admits or declines.
-5. Only then does the agent gain mutation authority for Tablet.
-
-The agent can inspect more context than it can mutate. **Inspection is not authority.**
-
----
-
-## Concurrency without the overwrite
-
-Every canonical project change advances the shared revision.
-
-An agent mutation carries `expectedRevision`. Presence checks it against the live revision **at the mutation boundary**.
+Presence checks that value again at execution time.
 
 ```ts
 if (expectedRevision !== project.revision) {
@@ -152,93 +134,102 @@ if (expectedRevision !== project.revision) {
 }
 ```
 
-So the memorable demo moment is not a fake conflict animation:
+So if the agent read `r31`, the human changes Mobile, and the project becomes `r32`, an operation based on `r31` never lands. The agent must re-read `r32` first.
 
-1. Agent reads revision `r31` and begins Tablet work.
-2. Human changes Mobile.
-3. Canonical state becomes `r32`.
-4. Agent tries to write using `expectedRevision: 31`.
-5. Presence rejects the write.
-6. Agent re-reads `r32`, adapts, and retries.
-
-The human’s change is never overwritten.
+That is the core concurrency guarantee.
 
 ---
 
-## Agent work stays provisional
+## Agent work is provisional
 
-A successful agent operation is still **not the final product state**.
+A permitted agent mutation still does not become final immediately.
 
-Tablet changes are previewed spatially and collected into a proposal. The human can:
+Tablet work is accumulated as a proposal. The human can:
 
-- focus the exact changed Tablet target;
-- reject an individual operation;
+- focus the actual changed Tablet component;
+- inspect each operation;
+- reject one operation without discarding the rest;
 - accept the remaining proposal;
-- reject the proposal entirely;
+- reject everything;
 - pause or revoke the agent before acceptance.
 
-Only human acceptance promotes the proposal into canonical shared state.
+Only human acceptance promotes the proposal into canonical project state.
+
+Agents cannot accept their own proposals on behalf of the human.
 
 ---
 
-## Phone authority
+## WebMCP surface
 
-Presence also has a focused human-authority companion at:
+The canonical browser integration uses `document.modelContext.registerTool()`.
+
+Presence exposes semantic tools for the collaboration lifecycle: role discovery, admission requests, project inspection, breakpoint inspection, scoped Tablet proposals, proposal submission, and fresh-state recovery after conflicts.
+
+The local `?demo=1` path uses the same domain admission and mutation APIs. It does not receive extra write privileges.
+
+See [`src/webmcp/register.ts`](./src/webmcp/register.ts) and [`docs/WEBMCP_SPEC.md`](./docs/WEBMCP_SPEC.md).
+
+---
+
+## Permission boundary
+
+Before an agent mutation executes, Presence requires all of the following:
+
+```text
+admission.status === active
+capability is granted
+requested surface is in scope
+expectedRevision === project.revision
+```
+
+A failure stops the mutation rather than merely warning after the fact.
+
+Important scope note: this is **application-level authority**. Presence does not claim cryptographic agent identity or browser-process sandboxing.
+
+---
+
+## Human authority can move to a phone
+
+Presence includes a focused authority companion at:
 
 ```text
 /remote/:sessionId
 ```
 
-The phone can **Admit, Decline, Pause, Resume, Review, Accept, Reject, and Revoke** without running the agent itself.
+The remote can **Admit, Decline, Pause, Resume, Review, Accept, Reject, and Revoke**. It never runs the agent and does not replace the editor.
 
-Cross-device authority can use Supabase Realtime Broadcast as an ephemeral transport. Same-origin tabs/windows fall back to `BroadcastChannel` for local QA.
+Same-origin tabs can synchronize through `BroadcastChannel`. Physical phone ↔ desktop pairing can use an ephemeral Supabase Realtime Broadcast channel:
 
 ```bash
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
 ```
 
-No account table or mobile agent runtime is required for the authority companion.
-
 ---
 
-## WebMCP boundary
+## Architecture
 
-The canonical browser integration uses `document.modelContext.registerTool()`.
+```mermaid
+flowchart LR
+    H[Human] -->|canonical edits| M[Mobile]
+    A[Browser agent] -->|request admission| P[Presence authority]
+    P -->|scoped capability| T[Tablet]
 
-Presence exposes semantic tools for things such as:
+    M --> S[(Shared project\nrevision N)]
+    T -->|expectedRevision = N| G{Mutation gate}
+    S --> G
 
-- discovering collaborator roles;
-- requesting admission;
-- inspecting project and breakpoint state;
-- proposing Tablet changes;
-- submitting a proposal for human review;
-- reading fresh state after a conflict.
+    G -->|valid + fresh| R[Provisional proposal]
+    G -->|wrong surface| O[SURFACE_NOT_ASSIGNED]
+    G -->|stale| X[STALE_STATE]
+    G -->|revoked| V[ADMISSION_REVOKED]
 
-The development fallback at `?demo=1` invokes the **same domain admission and mutation paths**. It does not receive extra write privileges.
-
-See [`docs/WEBMCP_SPEC.md`](./docs/WEBMCP_SPEC.md) for the contract and [`src/webmcp/register.ts`](./src/webmcp/register.ts) for the implementation.
-
----
-
-## Permission guarantees
-
-Presence rejects agent mutations unless all of these remain true at execution time:
-
-```text
-admission is active
-AND requested capability is granted
-AND Tablet is in the agent's scope
-AND expectedRevision === currentRevision
+    R -->|human accepts| S2[(Shared project\nrevision N + 1)]
 ```
 
-Pause/revoke removes mutation authority. Agents cannot accept their own proposals for humans.
-
-> **Security scope:** Presence currently enforces application-level authority. It does not claim cryptographic agent identity or sandbox the browser process.
-
 ---
 
-## Run it locally
+## Run locally
 
 ```bash
 git clone https://github.com/Davemafy/presence-webmcp.git
@@ -247,17 +238,23 @@ npm install
 npm run dev
 ```
 
-Then open the app normally, or use the deterministic local flagship proof:
+Open the normal product at:
+
+```text
+http://localhost:5173/
+```
+
+Or run the deterministic flagship path:
 
 ```text
 http://localhost:5173/?demo=1
 ```
 
-There is also a zero-dependency standalone proof in [`prototype.html`](./prototype.html).
+A dependency-free interactive proof also lives in [`prototype.html`](./prototype.html).
 
 ---
 
-## Verify the boundary
+## Verify it
 
 ```bash
 npm run smoke
@@ -266,7 +263,7 @@ npm run e2e
 npm run build
 ```
 
-The test surface covers the domain engine, WebMCP integration, stale-state recovery, review/acceptance, remote authority, and the flagship flow.
+The test surface covers the revisioned domain model, WebMCP integration, stale-state rejection and recovery, proposal review/acceptance, authority revocation, the flagship flow, and the phone authority route.
 
 ---
 
@@ -275,38 +272,32 @@ The test surface covers the domain engine, WebMCP integration, stale-state recov
 ```text
 src/
 ├── domain/          revisioned project + permission engine
-├── webmcp/          semantic browser-agent tool registration
-├── tests/           domain and integration coverage
+├── webmcp/          browser-agent semantic tools
+├── tests/           domain + integration tests
 ├── App.tsx          spatial collaboration workspace
 ├── RemoteApp.tsx    phone authority companion
 └── sessionSync.ts   cross-tab / realtime authority transport
 
 e2e/                 flagship + remote Playwright flows
-docs/                canonical product, UX, domain and WebMCP specs
+docs/                product, UX, domain and WebMCP specs
 scripts/smoke.mjs    zero-dependency sanity check
-prototype.html       standalone interactive product proof
+prototype.html       standalone interactive proof
 ```
 
 ---
 
-## Design principle
+## Design rule
 
-Presence is deliberately **not** trying to become another general canvas editor.
+Presence is not trying to become another general canvas editor.
 
-The spatial room exists to answer four questions at a glance:
+The room exists to make four things obvious without narration:
 
 **Who is here? What can they touch? What changed? Who decides?**
 
-Everything else is subordinate to that boundary.
+If a feature does not strengthen that boundary, it does not belong in the flagship proof.
 
 ---
 
-<div align="center">
+**Presence — humans and browser agents in the same live software, with authority that stays explicit.**
 
-### Human in Mobile. Agent in Tablet. Shared state protected between them.
-
-**[Run Presence →](https://bright-mochi-538dec.netlify.app/?demo=1)**
-
-Built for the WebMCP Challenge.
-
-</div>
+[**Run the demo →**](https://bright-mochi-538dec.netlify.app/?demo=1)
