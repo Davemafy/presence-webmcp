@@ -1,7 +1,7 @@
 export type Breakpoint='desktop'|'tablet'|'mobile'
 export type AdmissionStatus='discovered'|'pending'|'admitted'|'paused'|'revoked'
 export type AgentPhase='absent'|'discovered'|'requesting'|'present'|'inspecting'|'working'|'catching-up'|'ready'|'paused'|'revoked'
-export type PermissionError='ADMISSION_REQUIRED'|'ADMISSION_PENDING'|'ADMISSION_PAUSED'|'ADMISSION_REVOKED'|'CAPABILITY_NOT_GRANTED'|'SURFACE_NOT_ASSIGNED'|'STALE_STATE'|'CONSTRAINT_VIOLATION'|'INVALID_OPERATION'|'NOT_FOUND'
+export type PermissionError='ADMISSION_REQUIRED'|'ADMISSION_PENDING'|'ADMISSION_PAUSED'|'ADMISSION_REVOKED'|'CAPABILITY_NOT_GRANTED'|'SURFACE_NOT_ASSIGNED'|'STALE_STATE'|'HUMAN_APPROVAL_REQUIRED'|'REFERENCE_LOCKED'|'CONSTRAINT_VIOLATION'|'INVALID_OPERATION'|'NOT_FOUND'
 export type CapabilityScope={resource:'breakpoint';id:Breakpoint;mode:'inspect'|'propose'}
 export type HeroPart='copy'|'visual'
 export type Alignment='left'|'center'
@@ -16,16 +16,21 @@ export type Admission={
  requestedScopes:CapabilityScope[];grantedScopes:CapabilityScope[];
 }
 export type AuthorityOutcome='allowed'|'blocked'|'state'
-export type Activity={id:string;actor:'human'|'agent'|'system';message:string;revision:number;kind?:'activity'|'authority';outcome?:AuthorityOutcome;code?:PermissionError|'ADMISSION_GRANTED'|'PROPOSAL_CREATED';surface?:Breakpoint}
+export type Activity={id:string;actor:'human'|'agent'|'system';message:string;revision:number;kind?:'activity'|'authority';outcome?:AuthorityOutcome;code?:PermissionError|'ADMISSION_GRANTED'|'PROPOSAL_CREATED'|'PROPOSAL_READY'|'PROPOSAL_ACCEPTED'|'PROPOSAL_REJECTED'|'RESET';surface?:Breakpoint}
 export type MutationResult={ok:true}|{ok:false;error:PermissionError}
+
+export type ProposalReceipt={
+ id:string;proposalId:string;agentIdentity:string;role:string;scope:string;baseRevision:number;acceptedRevision:number;affectedBreakpoint:Breakpoint;operations:string[];operationExpectedRevisions:number[];protectedSurfaces:Breakpoint[];beforeFingerprints:Record<Breakpoint,string>;afterFingerprints:Record<Breakpoint,string>;approvedAt:string;outcome:'accepted';auditEventIds:string[]
+}
+export type ToolTrace={id:string;tool:string;description:string;input:Record<string,unknown>;result:unknown;durationMs:number;revision:number;auditEventId?:string;at:string}
 export type AgentWork={target:string|null;label:string;baseRevision:number|null;currentRevision:number|null;detail?:string}
 export type BlockedAttempt={error:PermissionError;message:string;atRevision:number;surface?:Breakpoint;nonce:number;expectedRevision?:number;componentId?:string;label?:string}
 export type Store={
  revision:number; admission?:Admission; agentPhase:AgentPhase; proposal?:Proposal; stale:boolean; reviewOpen:boolean; activity:Activity[];
  mobileDesign:ResponsiveDesign;tabletDesign:ResponsiveDesign;selectedMobile:string|null;humanPast:ResponsiveDesign[];humanFuture:ResponsiveDesign[];
- agentWork:AgentWork;reviewFocus:string|null;blockedAttempt?:BlockedAttempt;
+ agentWork:AgentWork;reviewFocus:string|null;blockedAttempt?:BlockedAttempt;receipts:ProposalReceipt[];toolTraces:ToolTrace[];agentPublications:number;evidenceSuite:{passed:number;total:number;ranAt?:string};
  discoverAgent:()=>void; requestAdmission:(reason?:string)=>void; denyAdmission:()=>void; approveAdmission:()=>void; pause:()=>void; resume:()=>void; revoke:()=>void;
  selectMobile:(componentId:string|null)=>void; humanEdit:(componentId:string,patch:DesignPatch,label:string)=>void; humanReorderHero:(order:HeroPart[])=>void; undo:()=>void; redo:()=>void; humanChange:()=>void;
- agentInspect:(componentId:string,label?:string)=>MutationResult; agentPropose:(op:Omit<Operation,'id'>)=>MutationResult; markProposalReady:()=>MutationResult; runAgentDemo:()=>Promise<void>; testRevokedAccess:()=>MutationResult;
+ agentInspect:(componentId:string,label?:string)=>MutationResult; agentPropose:(op:Omit<Operation,'id'>)=>MutationResult; markProposalReady:()=>MutationResult; agentPublish:()=>MutationResult; recordToolTrace:(trace:Omit<ToolTrace,'id'>)=>void; setEvidenceSuite:(passed:number,total:number)=>void; runAgentDemo:()=>Promise<void>; testRevokedAccess:()=>MutationResult;
  openReview:()=>void; closeReview:()=>void; focusReview:(componentId:string|null)=>void; rejectOp:(id:string)=>void; acceptProposal:()=>void; rejectProposal:()=>void; reset:()=>void;
 }

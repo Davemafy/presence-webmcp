@@ -1,5 +1,6 @@
 import {create} from 'zustand'
-import type {Activity,Admission,DesignPatch,MutationResult,Operation,ResponsiveDesign,Store} from './types'
+import type {Activity,Admission,DesignPatch,MutationResult,Operation,ResponsiveDesign,Store,ToolTrace} from './types'
+import {projectFingerprints} from './proof'
 
 let seq=0
 const id=(prefix:string)=>`${prefix}-${++seq}`
@@ -28,7 +29,8 @@ const initial=()=>({
  revision:12,admission:undefined,agentPhase:'absent' as const,proposal:undefined,stale:false,reviewOpen:false,
  mobileDesign:baseDesign(),tabletDesign:baseDesign(),selectedMobile:null,humanPast:[] as ResponsiveDesign[],humanFuture:[] as ResponsiveDesign[],
  agentWork:{target:null,label:'',baseRevision:null,currentRevision:null},reviewFocus:null,blockedAttempt:undefined,
- activity:[event('system','Workspace ready. Tablet has no collaborator.',12)],
+ receipts:[],toolTraces:[],agentPublications:0,evidenceSuite:{passed:0,total:16},
+ activity:[event('system','Workspace ready. Tablet has no collaborator.',12,{kind:'authority',outcome:'state',code:'RESET'})],
 })
 const applyPatch=(design:ResponsiveDesign,patch:Record<string,unknown>):ResponsiveDesign=>{
  const next=cloneDesign(design)
@@ -86,7 +88,7 @@ export const usePresenceStore=create<Store>((set,get)=>({
   const next=state.humanFuture[0];if(!next)return state
   return {mobileDesign:cloneDesign(next),humanPast:[...state.humanPast,cloneDesign(state.mobileDesign)].slice(-30),humanFuture:state.humanFuture.slice(1),revision:state.revision+1,activity:[...state.activity,event('human','Redid the Mobile edit.',state.revision+1)]}
  }),
- humanChange:()=>get().humanEdit('hero',{heroPadding:get().mobileDesign.heroPadding===28?20:28},'You tightened Mobile hero spacing.'),
+ humanChange:()=>get().humanEdit('hero',{heroOrder:['visual','copy'],alignment:'center',ctaFull:true},'You changed the Mobile hero composition.'),
  agentInspect:(componentId,label='Inspecting component')=>{
   const state=get();const gate=admissionError(state);if(gate)return gate
   if(!['hero','copy','media','features','nav','cta'].includes(componentId))return{ok:false,error:'NOT_FOUND'}
@@ -96,7 +98,7 @@ export const usePresenceStore=create<Store>((set,get)=>({
  agentPropose:(input):MutationResult=>{
   const state=get(); const gate=admissionError(state)
   if(gate){
-   if(!gate.ok){
+   if('error' in gate){
     const error=gate.error
     set(current=>({blockedAttempt:{error,message:blockedMessage(error,input.breakpoint),atRevision:current.revision,surface:input.breakpoint,nonce:Date.now(),expectedRevision:input.expectedRevision,componentId:input.componentId,label:input.label},activity:[...current.activity,event('system',`Operation blocked · ${input.breakpoint[0].toUpperCase()+input.breakpoint.slice(1)}`,current.revision,{kind:'authority',outcome:'blocked',code:error,surface:input.breakpoint})]}))
    }
@@ -104,8 +106,9 @@ export const usePresenceStore=create<Store>((set,get)=>({
   }
   const admission=state.admission!
   if(input.breakpoint!=='tablet'){
-   const error='SURFACE_NOT_ASSIGNED' as const
-   set(current=>({blockedAttempt:{error,message:blockedMessage(error,input.breakpoint),atRevision:current.revision,surface:input.breakpoint,nonce:Date.now(),expectedRevision:input.expectedRevision,componentId:input.componentId,label:input.label},activity:[...current.activity,event('system',`Operation blocked · ${input.breakpoint[0].toUpperCase()+input.breakpoint.slice(1)}`,current.revision,{kind:'authority',outcome:'blocked',code:error,surface:input.breakpoint})]}))
+   const error=input.breakpoint==='desktop'?'REFERENCE_LOCKED' as const:'SURFACE_NOT_ASSIGNED' as const
+   const message=input.breakpoint==='desktop'?'Desktop is locked as the canonical reference.':blockedMessage(error,input.breakpoint)
+   set(current=>({blockedAttempt:{error,message,atRevision:current.revision,surface:input.breakpoint,nonce:Date.now(),expectedRevision:input.expectedRevision,componentId:input.componentId,label:input.label},activity:[...current.activity,event('system',`Operation blocked · ${input.breakpoint[0].toUpperCase()+input.breakpoint.slice(1)}`,current.revision,{kind:'authority',outcome:'blocked',code:error,surface:input.breakpoint})]}))
    return{ok:false,error}
   }
   if(!admission.grantedScopes.some(scope=>scope.id===input.breakpoint&&scope.mode==='propose')){
@@ -123,8 +126,8 @@ export const usePresenceStore=create<Store>((set,get)=>({
   const operation:Operation={...input,id:id('op')}
   set(current=>({
    stale:false,blockedAttempt:undefined,agentPhase:'working',agentWork:{target:input.componentId,label:input.label,baseRevision:input.expectedRevision,currentRevision:current.revision,detail:`Applied provisionally at r${current.revision}`},
-   proposal:current.proposal&&['working','ready'].includes(current.proposal.status)
-    ?{...current.proposal,status:'working',operations:[...current.proposal.operations,operation]}
+   proposal:current.proposal&&['working','ready','conflicted'].includes(current.proposal.status)
+    ?{...current.proposal,status:'working',baseRevision:current.proposal.baseRevision===current.revision?current.proposal.baseRevision:current.revision,operations:[...current.proposal.operations.map(op=>current.proposal!.baseRevision===current.revision?op:{...op,expectedRevision:current.revision}),operation]}
     :{id:id('proposal'),status:'working',baseRevision:current.revision,operations:[operation],explanation:'Adapted Tablet while preserving the hierarchy and constraints of the live project.'},
    activity:[...current.activity,event('agent',input.label,current.revision),event('agent',`Proposal created · ${input.componentId}`,current.revision,{kind:'authority',outcome:'allowed',code:'PROPOSAL_CREATED',surface:'tablet'})]
   }))
@@ -133,52 +136,52 @@ export const usePresenceStore=create<Store>((set,get)=>({
  markProposalReady:():MutationResult=>{
   const state=get();const gate=admissionError(state);if(gate)return gate
   if(!state.proposal?.operations.length)return{ok:false,error:'INVALID_OPERATION'}
-  set(current=>({proposal:current.proposal?{...current.proposal,status:'ready'}:undefined,agentPhase:'ready',agentWork:{target:'hero',label:'Proposal ready',baseRevision:current.proposal?.baseRevision??current.revision,currentRevision:current.revision,detail:`${current.proposal?.operations.length??0} changes ready`},activity:[...current.activity,event('agent','Tablet proposal ready for your review.',current.revision)]}))
+  set(current=>({proposal:current.proposal?{...current.proposal,status:'ready'}:undefined,agentPhase:'ready',agentWork:{target:'hero',label:'Proposal ready',baseRevision:current.proposal?.baseRevision??current.revision,currentRevision:current.revision,detail:`${current.proposal?.operations.length??0} changes ready`},activity:[...current.activity,event('agent','Tablet proposal ready for your review.',current.revision,{kind:'authority',outcome:'state',code:'PROPOSAL_READY',surface:'tablet'})]}))
   return{ok:true}
  },
+ agentPublish:():MutationResult=>{
+  const state=get();const gate=admissionError(state);if(gate)return gate
+  const error='HUMAN_APPROVAL_REQUIRED' as const
+  set(current=>({agentPublications:current.agentPublications,blockedAttempt:{error,message:'Final approval belongs to the human.',atRevision:current.revision,surface:'tablet',nonce:Date.now(),expectedRevision:current.proposal?.baseRevision,label:'Agent attempted final publication'},activity:[...current.activity,event('system','Agent publication blocked · human approval required',current.revision,{kind:'authority',outcome:'blocked',code:error,surface:'tablet'})]}))
+  return{ok:false,error}
+ },
+ recordToolTrace:(trace:Omit<ToolTrace,'id'>)=>set(state=>({toolTraces:[...state.toolTraces,{...trace,id:id('tool')}].slice(-24)})),
+ setEvidenceSuite:(passed,total)=>set({evidenceSuite:{passed,total,ranAt:new Date().toISOString()}}),
  runAgentDemo:async()=>{
+
   const state=get(); if(state.admission?.status!=='admitted'||state.agentPhase!=='present'||state.proposal?.status==='working'||state.proposal?.status==='ready')return
   const base=state.revision
-  get().agentInspect('hero','Inspecting Hero')
-  await wait(650)
-  get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroLayout:'split',heroGap:16},label:'Changing Tablet hero layout',expectedRevision:base})
-  await wait(780)
-  // Real authority proof: attempt one Mobile mutation from the Tablet-scoped agent.
-  // The domain engine rejects this with SURFACE_NOT_ASSIGNED.
-  get().agentPropose({componentId:'hero',breakpoint:'mobile',patch:{heroGap:10},label:'Attempted Mobile hero change',expectedRevision:base})
-  await wait(1050)
-  get().agentInspect('nav','Inspecting navigation · edit Mobile now to prove concurrency')
-  // Give the human a real concurrency window. If they edit Mobile, the next
-  // agent mutation intentionally carries the original revision and proves
-  // STALE_STATE. If they do nothing, the agent simply continues normally.
-  await Promise.race([waitForRevisionChange(base,6500),wait(6500)])
-  const next=get().agentPropose({componentId:'nav',breakpoint:'tablet',patch:{navCompact:true},label:'Adapting Tablet navigation',expectedRevision:base})
-  if(!next.ok&&next.error==='STALE_STATE'){
-   await wait(900)
+  get().agentInspect('hero','Inspecting Hero · targeting Tablet')
+  await wait(520)
+  // Establish a visible, provisional Tablet intent at the current canonical revision.
+  // Nothing here mutates canonical project state.
+  get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroLayout:'split',heroPadding:42},label:'Prepared Tablet hero composition',expectedRevision:base})
+  await wait(420)
+  get().agentInspect('nav','Tablet plan ready · waiting on live project state')
+  // Keep a generous human concurrency window for the recording. A Mobile edit
+  // advances the shared revision while the agent still carries `base`.
+  await Promise.race([waitForRevisionChange(base,14000),wait(14000)])
+  const staleAttempt=get().agentPropose({componentId:'nav',breakpoint:'tablet',patch:{navCompact:true},label:'Applying Tablet navigation from earlier state',expectedRevision:base})
+  if('error' in staleAttempt&&staleAttempt.error==='STALE_STATE'){
+   // Conflict red-state is intentionally sub-second. Presence freezes, then the
+   // agent re-reads and rebases instead of overwriting the human revision.
+   await wait(720)
    const fresh=get().revision
-   set(current=>({stale:false,agentPhase:'inspecting',agentWork:{target:'hero',label:`Read r${fresh} → adapted plan`,baseRevision:fresh,currentRevision:fresh,detail:'Continuing from fresh state'},activity:[...current.activity,event('agent',`Read r${fresh}; adapted plan and continued.`,fresh)]}))
-   await wait(700)
-   get().agentPropose({componentId:'nav',breakpoint:'tablet',patch:{navCompact:true},label:'Adapted Tablet navigation',expectedRevision:fresh})
-   await wait(650)
-   get().agentInspect('hero','Checking Hero spacing')
-   await wait(500)
-   get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroOrder:['visual','copy'],heroGap:14,heroPadding:48},label:'Reordered Hero and tightened spacing',expectedRevision:fresh})
-   await wait(650)
-   get().agentInspect('cta','Inspecting CTA')
+   set(current=>({stale:false,blockedAttempt:undefined,proposal:current.proposal?{...current.proposal,baseRevision:fresh,operations:current.proposal.operations.map(op=>({...op,expectedRevision:fresh}))}:current.proposal,agentPhase:'inspecting',agentWork:{target:'hero',label:`Rebased on r${fresh}`,baseRevision:fresh,currentRevision:fresh,detail:'Human Mobile change preserved · adapting Tablet only'},activity:[...current.activity,event('agent',`Rebased safely on r${fresh}; Mobile preserved.`,fresh)]}))
+   await wait(520)
+   get().agentPropose({componentId:'nav',breakpoint:'tablet',patch:{navCompact:true},label:'Compacted Tablet navigation',expectedRevision:fresh})
+   await wait(420)
+   get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroOrder:['visual','copy'],heroGap:14,heroPadding:48},label:'Recomposed Tablet hero',expectedRevision:fresh})
    await wait(420)
    get().agentPropose({componentId:'cta',breakpoint:'tablet',patch:{ctaFull:true},label:'Expanded Tablet CTA',expectedRevision:fresh})
-   await wait(600)
-   get().agentInspect('copy','Checking headline scale')
-   await wait(420)
-   get().agentPropose({componentId:'copy',breakpoint:'tablet',patch:{titleScale:.92},label:'Balanced Tablet headline scale',expectedRevision:fresh})
+   await wait(360)
+   get().agentPropose({componentId:'copy',breakpoint:'tablet',patch:{titleScale:.92},label:'Balanced Tablet headline',expectedRevision:fresh})
   }else{
    const fresh=get().revision
-   await wait(550)
-   get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroOrder:['visual','copy'],heroPadding:48},label:'Reordered Tablet Hero',expectedRevision:fresh})
-   await wait(500)
+   await wait(420)
+   get().agentPropose({componentId:'hero',breakpoint:'tablet',patch:{heroOrder:['visual','copy'],heroGap:14,heroPadding:48},label:'Recomposed Tablet hero',expectedRevision:fresh})
+   await wait(360)
    get().agentPropose({componentId:'cta',breakpoint:'tablet',patch:{ctaFull:true},label:'Expanded Tablet CTA',expectedRevision:fresh})
-   await wait(500)
-   get().agentPropose({componentId:'copy',breakpoint:'tablet',patch:{titleScale:.92},label:'Balanced Tablet headline scale',expectedRevision:fresh})
   }
   get().markProposalReady()
  },
@@ -186,10 +189,17 @@ export const usePresenceStore=create<Store>((set,get)=>({
  openReview:()=>set(state=>state.proposal?.status==='ready'&&state.proposal.operations.length?({reviewOpen:true,reviewFocus:state.proposal.operations[0]?.componentId??null,activity:[...state.activity,event('human','Opened Tablet proposal for human review.',state.revision)]}):state),closeReview:()=>set({reviewOpen:false,reviewFocus:null}),focusReview:(componentId)=>set({reviewFocus:componentId}),
  rejectOp:operationId=>set(state=>state.proposal?({proposal:{...state.proposal,operations:state.proposal.operations.filter(operation=>operation.id!==operationId)},reviewFocus:state.reviewFocus===state.proposal.operations.find(operation=>operation.id===operationId)?.componentId?null:state.reviewFocus}):state),
  acceptProposal:()=>set(state=>{
-  if(!state.proposal)return state
+  if(!state.proposal||state.proposal.status!=='ready')return state
+  const before=projectFingerprints(state)
   const next=state.proposal.operations.reduce((design,operation)=>applyPatch(design,operation.patch),state.tabletDesign)
-  return {tabletDesign:next,proposal:{...state.proposal,status:'accepted'},reviewOpen:false,reviewFocus:null,revision:state.revision+1,agentPhase:state.admission?.status==='admitted'?'present':state.agentPhase,agentWork:{target:null,label:'Accepted',baseRevision:null,currentRevision:state.revision+1},activity:[...state.activity,event('human','Accepted selected Tablet changes.',state.revision+1)]}
+  const acceptedRevision=state.revision+1
+  const acceptEvent=event('human','Accepted selected Tablet changes.',acceptedRevision,{kind:'authority',outcome:'allowed',code:'PROPOSAL_ACCEPTED',surface:'tablet'})
+  const after=projectFingerprints({...state,tabletDesign:next})
+  const relevantIds=[...state.activity.filter(item=>item.revision>=state.proposal!.baseRevision).map(item=>item.id),acceptEvent.id]
+  const receipt:Store['receipts'][number]={id:id('receipt'),proposalId:state.proposal.id,agentIdentity:state.admission?.identity.displayName??'Browser agent',role:state.admission?.role??'responsive-collaborator',scope:'Tablet · propose only',baseRevision:state.proposal.baseRevision,acceptedRevision,affectedBreakpoint:'tablet',operations:state.proposal.operations.map(op=>op.label),operationExpectedRevisions:state.proposal.operations.map(op=>op.expectedRevision),protectedSurfaces:['desktop','mobile'],beforeFingerprints:before,afterFingerprints:after,approvedAt:new Date().toISOString(),outcome:'accepted',auditEventIds:relevantIds}
+  const acceptedState:Partial<Store>={tabletDesign:next,proposal:{...state.proposal,status:'accepted'},reviewOpen:false,reviewFocus:null,revision:acceptedRevision,agentPhase:state.admission?.status==='admitted'?'present':state.agentPhase,agentWork:{target:null,label:'Accepted',baseRevision:null,currentRevision:acceptedRevision},receipts:[...state.receipts,receipt],activity:[...state.activity,acceptEvent]}
+  return acceptedState
  }),
- rejectProposal:()=>set(state=>state.proposal?({proposal:{...state.proposal,status:'rejected'},reviewOpen:false,reviewFocus:null,agentPhase:state.admission?.status==='admitted'?'present':state.agentPhase,activity:[...state.activity,event('human','Rejected the Tablet proposal.',state.revision)]}):state),
- reset:()=>set(initial()),
+ rejectProposal:()=>set(state=>state.proposal?({proposal:{...state.proposal,status:'rejected'},reviewOpen:false,reviewFocus:null,agentPhase:state.admission?.status==='admitted'?'present':state.agentPhase,activity:[...state.activity,event('human','Rejected the Tablet proposal.',state.revision,{kind:'authority',outcome:'state',code:'PROPOSAL_REJECTED',surface:'tablet'})]}):state),
+ reset:()=>{seq=0;set(initial())},
 }))

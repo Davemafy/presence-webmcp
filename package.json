@@ -1,14 +1,19 @@
 {
   "name": "presence-agent-admission",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.5.13",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "npm run smoke && npm run acceptance && npm run aurora && npm run product && npm run navigation && npm run evidence && tsc -b && vite build",
     "test": "vitest run",
     "e2e": "playwright test",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "evidence": "vitest run src/tests/evidence.test.ts --reporter=json --outputFile=.evidence-results.json && node scripts/write-evidence.mjs",
+    "acceptance": "node scripts/editor-acceptance.mjs",
+    "aurora": "node scripts/aurora-acceptance.mjs",
+    "product": "node scripts/product-layer-acceptance.mjs",
+    "navigation": "node scripts/navigation-acceptance.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
